@@ -1,17 +1,19 @@
 #![feature(drain_filter)]
 #![feature(destructuring_assignment)]
 
+use std::vec;
+
 use ggez::{
-    conf::Conf, conf::NumSamples, conf::WindowMode, conf::WindowSetup, event, nalgebra::Point2,
-    timer, Context, ContextBuilder, GameResult,
+    conf::Conf, conf::NumSamples, conf::WindowMode, conf::WindowSetup, event, timer, Context,
+    ContextBuilder, GameResult,
 };
 use rand::prelude::*;
 use rand_distr::Normal;
 
-const ANT_SPEED: f64 = 10.0;
-const SCENT_LIFE: u32 = 1000;
-const ANT_DETECTION_RANGE: f64 = 15.0;
-const HOME_SIZE: f64 = 50.0;
+const ANT_SPEED: f64 = 5.0;
+const SCENT_LIFE: u32 = 300;
+const ANT_DETECTION_RANGE: f64 = 50.0;
+const HOME_SIZE: f64 = 25.0;
 
 const X_SIZE: u32 = 1000;
 const Y_SIZE: u32 = 1000;
@@ -94,7 +96,7 @@ impl Ant {
             direction: dir * 359.9,
             has_food: false,
             speed: ANT_SPEED,
-            life: 1000,
+            life: 2000,
         }
     }
 }
@@ -110,7 +112,7 @@ impl HomeScent {
         HomeScent {
             position: Coordinate::new(x, y),
             direction,
-            life: SCENT_LIFE,
+            life: SCENT_LIFE / 2,
         }
     }
 }
@@ -161,26 +163,34 @@ impl Navigable for Vec<FoodScent> {
     ) -> (Coordinate, f64) {
         let mut final_pos = None;
         let mut final_dir = None;
+        let mut last_strength = None;
         for coor in self {
             let dist = pos.dist(&coor.position);
             if dist < range {
-                (final_pos, final_dir) = match final_pos {
-                    Some(p) => match pos.dist(p) > dist {
-                        true => (Some(&coor.position), Some(&coor.direction)),
-                        false => (final_pos, final_dir),
-                    },
-                    None => (Some(&coor.position), Some(&coor.direction)),
+                match last_strength {
+                    Some(s) => {
+                        if s < coor.life {
+                            last_strength = Some(coor.life);
+                            final_pos = Some(&coor.position);
+                            final_dir = Some(coor.direction);
+                        }
+                    }
+                    None => {
+                        last_strength = Some(coor.life);
+                        final_pos = Some(&coor.position);
+                        final_dir = Some(coor.direction);
+                    }
                 }
             }
         }
         let direction: f64 = match final_pos {
             Some(p) => {
                 // get direction from the coordinate we are given
-                pos.dir(p)
+                pos.dir(&p)
             }
             None => {
                 // we were unable to find a position, so we need to make one up
-                let distribution = Normal::new(dir, 20.0).unwrap();
+                let distribution = Normal::new(dir, 50.0).unwrap();
                 let mut direction = distribution.sample(&mut rand::thread_rng());
                 // match to a valid direction
                 while direction > 359.9 {
@@ -193,24 +203,14 @@ impl Navigable for Vec<FoodScent> {
             }
         };
         if let None = final_dir {
-            final_dir = Some(&direction);
+            final_dir = Some(direction);
         }
         // now go from a direction and a coordinate to a new coordinate
         (
             pos.traverse_vec(direction, dist),
             final_dir.unwrap().clone(),
         )
-    }
-}
-// TODO there had to be a beter way to do this than to impl the same exact code twice
-impl Navigable for Vec<HomeScent> {
-    fn get_next_point(
-        &self,
-        pos: &Coordinate,
-        range: f64,
-        dist: f64,
-        dir: f64,
-    ) -> (Coordinate, f64) {
+        /*
         let mut final_pos = None;
         let mut final_dir = None;
         for coor in self {
@@ -252,6 +252,153 @@ impl Navigable for Vec<HomeScent> {
             pos.traverse_vec(direction, dist),
             final_dir.unwrap().clone(),
         )
+        */
+        /*
+        let mut x_pos = pos.x;
+        let mut y_pos = pos.y;
+        let mut final_dir = None;
+        let mut scent_count = 0;
+        for coor in self {
+            let dist = pos.dist(&coor.position);
+            if dist < range {
+                x_pos += pos.x - coor.position.x;
+                y_pos += pos.y - coor.position.y;
+                scent_count += 1;
+            }
+        }
+        let direction: f64 = match scent_count {
+            0 => {
+                // we were unable to find a position, so we need to make one up
+                let distribution = Normal::new(dir, 20.0).unwrap();
+                let mut direction = distribution.sample(&mut rand::thread_rng());
+                // match to a valid direction
+                while direction > 359.9 {
+                    direction -= 359.9;
+                }
+                while direction < 0.0 {
+                    direction += 359.9
+                }
+                direction
+            }
+            _ => {
+                // we have a position
+                x_pos = x_pos / (scent_count as f64);
+                y_pos = y_pos / (scent_count as f64);
+                let coor = Coordinate::new(x_pos, y_pos);
+                pos.dir(&coor)
+            }
+        };
+        if let None = final_dir {
+            final_dir = Some(&direction);
+        }
+        // now go from a direction and a coordinate to a new coordinate
+        (
+            pos.traverse_vec(direction, dist),
+            final_dir.unwrap().clone(),
+        */
+    }
+}
+// TODO there had to be a beter way to do this than to impl the same exact code twice
+impl Navigable for Vec<HomeScent> {
+    fn get_next_point(
+        &self,
+        pos: &Coordinate,
+        range: f64,
+        dist: f64,
+        dir: f64,
+    ) -> (Coordinate, f64) {
+        let mut final_pos = None;
+        let mut final_dir = None;
+        let mut last_strength = None;
+        for coor in self {
+            let dist = pos.dist(&coor.position);
+            if dist < range {
+                match last_strength {
+                    Some(s) => {
+                        if s < coor.life {
+                            last_strength = Some(coor.life);
+                            final_pos = Some(&coor.position);
+                            final_dir = Some(coor.direction);
+                        }
+                    }
+                    None => {
+                        last_strength = Some(coor.life);
+                        final_pos = Some(&coor.position);
+                        final_dir = Some(coor.direction);
+                    }
+                }
+            }
+        }
+        let direction: f64 = match final_pos {
+            Some(p) => {
+                // get direction from the coordinate we are given
+                pos.dir(&p)
+            }
+            None => {
+                // we were unable to find a position, so we need to make one up
+                let distribution = Normal::new(dir, 50.0).unwrap();
+                let mut direction = distribution.sample(&mut rand::thread_rng());
+                // match to a valid direction
+                while direction > 359.9 {
+                    direction -= 359.9;
+                }
+                while direction < 0.0 {
+                    direction += 359.9
+                }
+                direction
+            }
+        };
+        if let None = final_dir {
+            final_dir = Some(direction);
+        }
+        // now go from a direction and a coordinate to a new coordinate
+        (
+            pos.traverse_vec(direction, dist),
+            final_dir.unwrap().clone(),
+        )
+        /*
+        let mut final_pos = None;
+        let mut final_dir = None;
+        for coor in self {
+            let dist = pos.dist(&coor.position);
+            if dist < range {
+                (final_pos, final_dir) = match final_pos {
+                    Some(p) => match pos.dist(p) > dist {
+                        true => (Some(&coor.position), Some(&coor.direction)),
+                        false => (final_pos, final_dir),
+                    },
+                    None => (Some(&coor.position), Some(&coor.direction)),
+                }
+            }
+        }
+        let direction: f64 = match final_pos {
+            Some(p) => {
+                // get direction from the coordinate we are given
+                pos.dir(p)
+            }
+            None => {
+                // we were unable to find a position, so we need to make one up
+                let distribution = Normal::new(dir, 20.0).unwrap();
+                let mut direction = distribution.sample(&mut rand::thread_rng());
+                // match to a valid direction
+                while direction > 359.9 {
+                    direction -= 359.9;
+                }
+                while direction < 0.0 {
+                    direction += 359.9
+                }
+                direction
+            }
+        };
+        if let None = final_dir {
+            final_dir = Some(&direction);
+        }
+        // now go from a direction and a coordinate to a new coordinate
+        (
+            pos.traverse_vec(direction, dist),
+            final_dir.unwrap().clone(),
+        )
+        */
     }
 }
 
@@ -319,7 +466,7 @@ fn gen_food_cluster(size: u32, x: f64, y: f64) -> Vec<Coordinate> {
 
 impl ggez::event::EventHandler for State {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
-        while timer::check_update_time(ctx, 10) {
+        while timer::check_update_time(ctx, 60) {
             if self.home_food > 5 {
                 self.ants
                     .push(Ant::new(self.home_position.x, self.home_position.y));
@@ -364,7 +511,7 @@ impl ggez::event::EventHandler for State {
                     a.direction = next_pos.1;
 
                     // see if we have reached home
-                    if a.position.dist(&self.home_position) < 50.0 {
+                    if a.position.dist(&self.home_position) < 25.0 {
                         // we have
                         a.has_food = false;
                         self.home_food += 1;
@@ -402,7 +549,10 @@ impl ggez::event::EventHandler for State {
                     if let Some(f) = food_to_eat {
                         a.position = self.food_positions.get(f).unwrap().to_owned();
                         self.food_positions.remove(f);
+                        // a food scent corresponts to a food position for the first food_positions.len() items
+                        self.food_scents.remove(f);
                         a.has_food = true;
+                        continue;
                     }
 
                     // walk
@@ -412,6 +562,7 @@ impl ggez::event::EventHandler for State {
                         ANT_SPEED,
                         a.direction,
                     );
+                    // TODO need to also account for food items themselves
 
                     a.position = next_pos.0;
                     a.direction = next_pos.1;
@@ -434,8 +585,36 @@ impl ggez::event::EventHandler for State {
             self.home_position.clone(),
             HOME_SIZE as f32,
             1.0,
-            ggez::graphics::Color::from_rgb(200, 15, 0),
+            ggez::graphics::Color::from_rgb(46, 19, 0),
         );
+
+        for hs in self.home_scents.iter_mut() {
+            let life = match hs.life {
+                l if l > SCENT_LIFE => SCENT_LIFE,
+                l => l,
+            };
+            scene = scene.circle(
+                ggez::graphics::DrawMode::Fill(ggez::graphics::FillOptions::DEFAULT),
+                hs.position.clone(),
+                5.0 * (life as f32 / SCENT_LIFE as f32),
+                1.0,
+                ggez::graphics::Color::from_rgb(0, 44, 190),
+            );
+        }
+
+        for fs in self.food_scents.iter_mut() {
+            let life = match fs.life {
+                l if l > SCENT_LIFE => SCENT_LIFE,
+                l => l,
+            };
+            scene = scene.circle(
+                ggez::graphics::DrawMode::Fill(ggez::graphics::FillOptions::DEFAULT),
+                fs.position.clone(),
+                5.0 * (life as f32 / SCENT_LIFE as f32),
+                1.0,
+                ggez::graphics::Color::from_rgb(190, 190, 0),
+            );
+        }
 
         for f in self.food_positions.iter_mut() {
             scene = scene.circle(
@@ -444,26 +623,6 @@ impl ggez::event::EventHandler for State {
                 5 as f32,
                 1.0,
                 ggez::graphics::Color::from_rgb(15, 200, 15),
-            );
-        }
-
-        for hs in self.home_scents.iter_mut() {
-            scene = scene.circle(
-                ggez::graphics::DrawMode::Fill(ggez::graphics::FillOptions::DEFAULT),
-                hs.position.clone(),
-                5.0 * (hs.life / SCENT_LIFE) as f32,
-                1.0,
-                ggez::graphics::Color::from_rgb(0, 44, 190),
-            );
-        }
-
-        for fs in self.food_scents.iter_mut() {
-            scene = scene.circle(
-                ggez::graphics::DrawMode::Fill(ggez::graphics::FillOptions::DEFAULT),
-                fs.position.clone(),
-                5.0 * (fs.life / SCENT_LIFE) as f32,
-                1.0,
-                ggez::graphics::Color::from_rgb(190, 190, 0),
             );
         }
 
@@ -487,8 +646,14 @@ impl ggez::event::EventHandler for State {
 pub fn main() {
     let mut state = State::new();
 
+    state.home_scents.push(HomeScent {
+        position: Coordinate { x: 500.0, y: 500.0 },
+        direction: 0.0,
+        life: u32::MAX,
+    });
+
     // gen food clusters
-    for _ in 0..6 {
+    for _ in 0..15 {
         let mut r = rand::thread_rng();
 
         // get baseline variance
@@ -497,6 +662,14 @@ pub fn main() {
 
         let mut cluster = gen_food_cluster(150, enforce_x_bounds(x), enforce_y_bounds(y));
         state.food_positions.append(&mut cluster);
+    }
+
+    for p in &state.food_positions {
+        state.food_scents.push(FoodScent {
+            position: Coordinate::new(p.x, p.y),
+            direction: 0.0,
+            life: u32::MAX,
+        })
     }
 
     let mut c = Conf::new();
