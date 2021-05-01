@@ -20,8 +20,8 @@ const SCENT_LIFE: u32 = 300;
 const ANT_DETECTION_RANGE: f32 = 50.0;
 const HOME_SIZE: f32 = 25.0;
 
-const X_SIZE: f32 = 500.0;
-const Y_SIZE: f32 = 500.0;
+const X_SIZE: f32 = 1000.0;
+const Y_SIZE: f32 = 1000.0;
 
 struct Coordinate {
     x: f32,
@@ -101,7 +101,7 @@ impl Ant {
             direction: dir * 359.9,
             has_food: false,
             speed: ANT_SPEED,
-            life: 4000,
+            life: 2000,
         }
     }
 
@@ -203,7 +203,7 @@ impl Navigable for Vec<Scent> {
             }
             None => {
                 // we were unable to find a position, so we need to make one up
-                let distribution = Normal::new(dir, 0.25).unwrap();
+                let distribution = Normal::new(dir, 50.0).unwrap();
                 let mut direction = distribution.sample(&mut rand::thread_rng());
                 // match to a valid direction
                 while direction > 359.9 {
@@ -232,12 +232,12 @@ impl State {
 
         State {
             dt: std::time::Duration::new(0, 0),
-            home_position: Coordinate::new(X_SIZE / 2.0, Y_SIZE / 2.0),
+            home_position: Coordinate::new(500.0, 500.0),
             food_positions,
             ants: vec![],
             home_scents: vec![],
             food_scents: vec![],
-            home_food: 25,
+            home_food: 100,
         }
     }
 }
@@ -297,7 +297,7 @@ fn gen_food_cluster(size: u32, x: f32, y: f32) -> Vec<Coordinate> {
 
 impl ggez::event::EventHandler for State {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
-        while timer::check_update_time(ctx, 30) {
+        while timer::check_update_time(ctx, 60) {
             if self.home_food > 5 {
                 self.ants
                     .push(Ant::new(self.home_position.x, self.home_position.y));
@@ -317,7 +317,6 @@ impl ggez::event::EventHandler for State {
                 a.life -= 1;
                 // if the ant is dead, turn its body into some food
                 if a.life == 0 {
-                    // TODO handle the fact that ant death should leave food scents
                     let mut new_food = gen_food_cluster(3, a.position.x, a.position.y);
                     self.food_positions.append(&mut new_food);
                 }
@@ -372,10 +371,6 @@ impl ggez::event::EventHandler for State {
 
                     if let Some(f) = food_to_eat {
                         a.position = self.food_positions.get(f).unwrap().to_owned();
-                        a.direction = match a.direction {
-                            d if d > 180.0 => d - 180.0,
-                            d => d + 180.0,
-                        };
                         self.food_positions.remove(f);
                         // a food scent corresponts to a food position for the first food_positions.len() items
                         self.food_scents.remove(f);
@@ -450,12 +445,7 @@ impl ggez::event::EventHandler for State {
         }
         let scene = scene.build(ctx).unwrap();
         ggez::graphics::clear(ctx, ggez::graphics::Color::from_rgb(0, 0, 0));
-        let mut params = ggez::graphics::DrawParam::default();
-        params.scale = ggez::mint::Vector2 {
-            x: 2.0 as f32,
-            y: 2.0 as f32,
-        };
-        ggez::graphics::draw(ctx, &scene, params).unwrap();
+        ggez::graphics::draw(ctx, &scene, ggez::graphics::DrawParam::default()).unwrap();
         ggez::graphics::present(ctx).unwrap();
         Ok(())
     }
@@ -465,10 +455,7 @@ pub fn main() {
     let mut state = State::new();
 
     state.home_scents.push(Scent {
-        position: Coordinate {
-            x: X_SIZE / 2.0,
-            y: Y_SIZE / 2.0,
-        },
+        position: Coordinate { x: 500.0, y: 500.0 },
         direction: 0.0,
         life: u32::MAX,
     });
@@ -485,14 +472,11 @@ pub fn main() {
         state.food_positions.append(&mut cluster);
     }
 
-    let mut i = 0;
-
     for p in &state.food_positions {
-        i += 1;
         state.food_scents.push(Scent {
             position: Coordinate::new(p.x, p.y),
             direction: 0.0,
-            life: u32::MAX - i,
+            life: u32::MAX,
         })
     }
 
@@ -505,15 +489,15 @@ pub fn main() {
         srgb: true,
     };
     c.window_mode = WindowMode {
-        width: X_SIZE * 2.0,
-        height: Y_SIZE * 2.0,
+        width: X_SIZE,
+        height: Y_SIZE,
         maximized: false,
         fullscreen_type: ggez::conf::FullscreenType::Windowed,
         borderless: false,
-        min_width: X_SIZE * 2.0,
-        min_height: Y_SIZE * 2.0,
-        max_width: X_SIZE * 2.0,
-        max_height: Y_SIZE * 2.0,
+        min_width: X_SIZE,
+        min_height: Y_SIZE,
+        max_width: X_SIZE,
+        max_height: Y_SIZE,
         resizable: false,
     };
     let (ref mut ctx, ref mut event_loop) = ContextBuilder::new("hello_ggez", "awesome_person")
