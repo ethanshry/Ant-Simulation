@@ -15,136 +15,20 @@ use ggez::{
 use rand::prelude::*;
 use rand_distr::Normal;
 
-const ANT_SPEED: f32 = 5.0;
-const SCENT_LIFE: u32 = 300;
+mod ant;
+mod coordinate;
+mod scent;
+
+use ant::Ant;
+use coordinate::Coordinate;
+use scent::{Navigable, Scent, SCENT_LIFE};
+
+const ANT_SPEED: f32 = 15.0;
 const ANT_DETECTION_RANGE: f32 = 50.0;
 const HOME_SIZE: f32 = 25.0;
 
 const X_SIZE: f32 = 500.0;
 const Y_SIZE: f32 = 500.0;
-
-struct Coordinate {
-    x: f32,
-    y: f32,
-}
-
-impl Coordinate {
-    pub fn new(x: f32, y: f32) -> Coordinate {
-        Coordinate {
-            x: match x {
-                x if x > X_SIZE => X_SIZE,
-                _ if x < 0.0 => 0.0,
-                _ => x,
-            },
-            y: match y {
-                y if y > Y_SIZE => Y_SIZE,
-                _ if y < 0.0 => 0.0,
-                _ => y,
-            },
-        }
-    }
-
-    pub fn dist(&self, coor: &Coordinate) -> f32 {
-        let dist_x = (self.x - coor.x) * (self.x - coor.x);
-        let dist_y = (self.y - coor.y) * (self.y - coor.y);
-        return (dist_x + dist_y).sqrt();
-    }
-
-    pub fn dir(&self, coor: &Coordinate) -> f32 {
-        let mut angle = ((self.y - coor.y) / (self.x - coor.x)).atan().to_degrees();
-        if angle > 359.9 {
-            angle = 0.0;
-        }
-
-        return angle;
-    }
-
-    pub fn traverse_vec(&self, dir: f32, dist: f32) -> Coordinate {
-        let y = dist * dir.sin();
-        let x = dist * dir.cos();
-        Coordinate::new(self.x + x, self.y + y)
-    }
-}
-
-impl Into<ggez::mint::Point2<f32>> for Coordinate {
-    fn into(self) -> ggez::mint::Point2<f32> {
-        ggez::mint::Point2 {
-            x: self.x,
-            y: self.y,
-        }
-    }
-}
-
-impl Clone for Coordinate {
-    fn clone(&self) -> Self {
-        Self {
-            x: self.x.clone(),
-            y: self.y.clone(),
-        }
-    }
-}
-
-struct Ant {
-    position: Coordinate,
-    direction: f32, // angle 0 -> 359
-    has_food: bool,
-    speed: f32,
-    life: u32,
-}
-
-impl Ant {
-    pub fn new(x: f32, y: f32) -> Ant {
-        let mut r = rand::thread_rng();
-        let dir: f32 = r.gen::<f32>();
-        Ant {
-            position: Coordinate::new(x, y),
-            direction: dir * 359.9,
-            has_food: false,
-            speed: ANT_SPEED,
-            life: 4000,
-        }
-    }
-
-    pub fn traverse<T>(&mut self, waypoints: &T) -> ()
-    where
-        T: Navigable,
-    {
-        let (position, direction) = waypoints.get_next_point(
-            &self.position,
-            ANT_DETECTION_RANGE,
-            self.speed,
-            self.direction,
-        );
-        self.position = position.to_owned();
-        self.direction = direction;
-    }
-
-    pub fn draw<'a>(&mut self, mesh: &'a mut MeshBuilder) -> &'a mut MeshBuilder {
-        mesh.circle(
-            ggez::graphics::DrawMode::Fill(ggez::graphics::FillOptions::DEFAULT),
-            self.position.clone(),
-            5 as f32,
-            1.0,
-            ggez::graphics::Color::from_rgb(220, 15, 0),
-        )
-    }
-}
-
-struct Scent {
-    position: Coordinate,
-    direction: f32,
-    life: u32,
-}
-
-impl Scent {
-    pub fn new(x: f32, y: f32, direction: f32) -> Scent {
-        Scent {
-            position: Coordinate::new(x, y),
-            direction,
-            life: SCENT_LIFE / 2,
-        }
-    }
-}
 
 struct State {
     dt: std::time::Duration,
@@ -154,76 +38,6 @@ struct State {
     home_scents: Vec<Scent>,
     food_scents: Vec<Scent>,
     home_food: u32,
-}
-
-trait Navigable {
-    fn get_next_point(
-        &self,
-        pos: &Coordinate,
-        range: f32,
-        dist: f32,
-        dir: f32,
-    ) -> (Coordinate, f32);
-}
-
-impl Navigable for Vec<Scent> {
-    fn get_next_point(
-        &self,
-        pos: &Coordinate,
-        range: f32,
-        dist: f32,
-        dir: f32,
-    ) -> (Coordinate, f32) {
-        let mut final_pos = None;
-        let mut final_dir = None;
-        let mut last_strength = None;
-        for coor in self {
-            let dist = pos.dist(&coor.position);
-            if dist < range {
-                match last_strength {
-                    Some(s) => {
-                        if s < coor.life {
-                            last_strength = Some(coor.life);
-                            final_pos = Some(&coor.position);
-                            final_dir = Some(coor.direction);
-                        }
-                    }
-                    None => {
-                        last_strength = Some(coor.life);
-                        final_pos = Some(&coor.position);
-                        final_dir = Some(coor.direction);
-                    }
-                }
-            }
-        }
-        let direction: f32 = match final_pos {
-            Some(p) => {
-                // get direction from the coordinate we are given
-                pos.dir(&p)
-            }
-            None => {
-                // we were unable to find a position, so we need to make one up
-                let distribution = Normal::new(dir, 0.25).unwrap();
-                let mut direction = distribution.sample(&mut rand::thread_rng());
-                // match to a valid direction
-                while direction > 359.9 {
-                    direction -= 359.9;
-                }
-                while direction < 0.0 {
-                    direction += 359.9
-                }
-                direction
-            }
-        };
-        if let None = final_dir {
-            final_dir = Some(direction);
-        }
-        // now go from a direction and a coordinate to a new coordinate
-        (
-            pos.traverse_vec(direction, dist),
-            final_dir.unwrap().clone(),
-        )
-    }
 }
 
 impl State {
@@ -237,7 +51,7 @@ impl State {
             ants: vec![],
             home_scents: vec![],
             food_scents: vec![],
-            home_food: 25,
+            home_food: 6,
         }
     }
 }
@@ -297,7 +111,7 @@ fn gen_food_cluster(size: u32, x: f32, y: f32) -> Vec<Coordinate> {
 
 impl ggez::event::EventHandler for State {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
-        while timer::check_update_time(ctx, 30) {
+        while timer::check_update_time(ctx, 5) {
             if self.home_food > 5 {
                 self.ants
                     .push(Ant::new(self.home_position.x, self.home_position.y));
@@ -393,11 +207,11 @@ impl ggez::event::EventHandler for State {
         Ok(())
     }
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
-        println!("frame_time: {}", self.dt.as_millis());
-        println!("ants: {}", self.ants.len());
-        println!("home scents: {}", self.home_scents.len());
-        println!("food scents: {}", self.food_scents.len());
-        println!("home food: {}", self.home_food);
+        // println!("frame_time: {}", self.dt.as_millis());
+        // println!("ants: {}", self.ants.len());
+        // println!("home scents: {}", self.home_scents.len());
+        // println!("food scents: {}", self.food_scents.len());
+        // println!("home food: {}", self.home_food);
         let mut scene = &mut ggez::graphics::MeshBuilder::new();
         scene.circle(
             ggez::graphics::DrawMode::Fill(ggez::graphics::FillOptions::DEFAULT),
@@ -447,6 +261,7 @@ impl ggez::event::EventHandler for State {
 
         for a in self.ants.iter_mut() {
             scene = a.draw(scene);
+            println!("direction: {}", a.direction);
         }
         let scene = scene.build(ctx).unwrap();
         ggez::graphics::clear(ctx, ggez::graphics::Color::from_rgb(0, 0, 0));
