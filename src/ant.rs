@@ -1,14 +1,15 @@
 #![feature(drain_filter)]
 #![feature(destructuring_assignment)]
 
-use crate::coordinate::Coordinate;
-use crate::scent::{Navigable, Scent};
+use crate::navigable::Navigable;
+use crate::scent::Scent;
+use crate::{coordinate::Coordinate, Bounded};
 use ggez::graphics::MeshBuilder;
 use rand::prelude::*;
 
-const ANT_SPEED: f32 = 15.0;
+const ANT_SPEED: f32 = 3.0;
 const SCENT_LIFE: u32 = 300;
-const ANT_DETECTION_RANGE: f32 = 50.0;
+const ANT_DETECTION_RANGE: f32 = 25.0;
 const HOME_SIZE: f32 = 25.0;
 
 const X_SIZE: f32 = 500.0;
@@ -35,26 +36,53 @@ impl Ant {
         }
     }
 
-    pub fn traverse<T>(&mut self, waypoints: &T) -> ()
+    /// Try to get closer to the next target
+    ///
+    /// # Arguments
+    /// - `targets` things which we want to go to, should be prioritied over waypoints
+    /// - `waypoints` things which direct us to targets
+    pub fn traverse<T, U>(&mut self, targets: Option<&T>, waypoints: &U) -> ()
     where
         T: Navigable,
+        U: Navigable,
     {
-        let (position, direction) = waypoints.get_next_point(
-            &self.position,
-            ANT_DETECTION_RANGE,
-            self.speed,
-            self.direction,
-        );
-        self.position = position.to_owned();
-        self.direction = direction;
+        match targets {
+            Some(targets) => {
+                let position = targets.get_nearest(
+                    &self.position,
+                    ANT_DETECTION_RANGE,
+                    self.speed,
+                    self.direction,
+                );
+                self.direction = self.position.direction(&position);
+                self.position = self.position.traverse_direction(self.direction, self.speed);
+            }
+            None => {
+                let direction = waypoints.get_avg_direction(
+                    &self.position,
+                    ANT_DETECTION_RANGE,
+                    self.speed,
+                    self.direction,
+                );
+                self.direction = direction;
+                self.position = self.position.traverse_direction(self.direction, self.speed);
+            }
+        }
     }
 
     pub fn draw<'a>(&mut self, mesh: &'a mut MeshBuilder) -> &'a mut MeshBuilder {
-        mesh.circle(
+        let output = mesh.circle(
+            ggez::graphics::DrawMode::Stroke(ggez::graphics::StrokeOptions::DEFAULT),
+            self.position.clone(),
+            ANT_DETECTION_RANGE as f32,
+            0.1,
+            ggez::graphics::Color::from_rgb(255, 0, 0),
+        );
+        output.circle(
             ggez::graphics::DrawMode::Fill(ggez::graphics::FillOptions::DEFAULT),
             self.position.clone(),
             5 as f32,
-            1.0,
+            0.1,
             ggez::graphics::Color::from_rgb(220, 15, 0),
         )
     }

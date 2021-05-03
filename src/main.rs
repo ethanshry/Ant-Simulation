@@ -17,13 +17,15 @@ use rand_distr::Normal;
 
 mod ant;
 mod coordinate;
+mod navigable;
 mod scent;
 
 use ant::Ant;
 use coordinate::Coordinate;
-use scent::{Navigable, Scent, SCENT_LIFE};
+use navigable::Navigable;
+use scent::{Scent, SCENT_LIFE};
 
-const ANT_SPEED: f32 = 15.0;
+const ANT_SPEED: f32 = 3.0;
 const ANT_DETECTION_RANGE: f32 = 50.0;
 const HOME_SIZE: f32 = 25.0;
 
@@ -111,7 +113,7 @@ fn gen_food_cluster(size: u32, x: f32, y: f32) -> Vec<Coordinate> {
 
 impl ggez::event::EventHandler for State {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
-        while timer::check_update_time(ctx, 5) {
+        while timer::check_update_time(ctx, 30) {
             if self.home_food > 5 {
                 self.ants
                     .push(Ant::new(self.home_position.x, self.home_position.y));
@@ -146,7 +148,7 @@ impl ggez::event::EventHandler for State {
                         .push(Scent::new(a.position.x, a.position.y, new_dir));
 
                     // walk
-                    a.traverse(&self.home_scents);
+                    a.traverse(Some(&self.home_position), &self.home_scents);
 
                     // see if we have reached home
                     if a.position.dist(&self.home_position) < HOME_SIZE {
@@ -191,17 +193,18 @@ impl ggez::event::EventHandler for State {
                             d => d + 180.0,
                         };
                         self.food_positions.remove(f);
-                        // a food scent corresponts to a food position for the first food_positions.len() items
-                        self.food_scents.remove(f);
                         a.has_food = true;
                         continue;
                     }
 
                     // walk
-                    a.traverse(&self.food_scents);
+                    a.traverse(Some(&self.food_positions), &self.food_scents);
                 }
             }
-            self.ants = Vec::drain_filter(&mut self.ants, |a| a.life > 0).collect();
+            self.ants = Vec::drain_filter(&mut self.ants, |a| {
+                a.life > 0 || a.position != a.position.check_bounds(0.0, X_SIZE, 0.0, Y_SIZE)
+            })
+            .collect();
         }
         self.dt = timer::delta(ctx);
         Ok(())
@@ -298,17 +301,6 @@ pub fn main() {
 
         let mut cluster = gen_food_cluster(150, x.enforce_x_bounds(), y.enforce_y_bounds());
         state.food_positions.append(&mut cluster);
-    }
-
-    let mut i = 0;
-
-    for p in &state.food_positions {
-        i += 1;
-        state.food_scents.push(Scent {
-            position: Coordinate::new(p.x, p.y),
-            direction: 0.0,
-            life: u32::MAX - i,
-        })
     }
 
     let mut c = Conf::new();

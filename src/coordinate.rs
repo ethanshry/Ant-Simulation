@@ -1,10 +1,15 @@
 #![feature(drain_filter)]
 #![feature(destructuring_assignment)]
 
+use crate::navigable::Navigable;
+use rand::prelude::*;
+use rand_distr::Normal;
+
 // TODO refactor so we don't need these in all files
 const X_SIZE: f32 = 500.0;
 const Y_SIZE: f32 = 500.0;
 
+#[derive(Debug, PartialEq)]
 pub struct Coordinate {
     pub x: f32,
     pub y: f32,
@@ -13,6 +18,21 @@ pub struct Coordinate {
 impl Coordinate {
     pub fn new(x: f32, y: f32) -> Coordinate {
         Coordinate { x, y }
+    }
+
+    pub fn check_bounds(&self, x_low: f32, x_high: f32, y_low: f32, y_high: f32) -> Coordinate {
+        let mut c = Coordinate::new(self.x, self.y);
+        c.x = match c.x {
+            _ if c.x > x_high => X_SIZE,
+            _ if c.x < x_low => x_low,
+            _ => c.x,
+        };
+        c.y = match c.y {
+            _ if c.y > y_high => y_high,
+            _ if c.y < y_low => y_low,
+            _ => c.y,
+        };
+        c
     }
 
     pub fn enforce_bounds(&mut self, x_low: f32, x_high: f32, y_low: f32, y_high: f32) {
@@ -30,12 +50,7 @@ impl Coordinate {
 
     pub fn dist(&self, coor: &Coordinate) -> f32 {
         let dist_x = (self.x - coor.x) * (self.x - coor.x);
-        println!("varx {}", self.x);
-        println!("varx {}", coor.x);
-        println!("varx {}", self.x - coor.x);
-        println!("x {}", dist_x);
         let dist_y = (self.y - coor.y) * (self.y - coor.y);
-        println!("y {}", dist_y);
         return (dist_x + dist_y).sqrt();
     }
 
@@ -82,6 +97,110 @@ impl Clone for Coordinate {
             x: self.x.clone(),
             y: self.y.clone(),
         }
+    }
+}
+
+impl Navigable for Coordinate {
+    fn get_nearest(&self, pos: &Coordinate, range: f32, dist: f32, dir: f32) -> Coordinate {
+        // now go from a direction and a coordinate to a new coordinate
+        if pos.dist(&self) < range {
+            self.clone()
+        } else {
+            let dir = self.get_avg_direction(pos, range, dist, dir);
+            self.traverse_direction(dir, range)
+        }
+    }
+
+    fn get_avg_direction(&self, pos: &Coordinate, range: f32, dist: f32, dir: f32) -> f32 {
+        if pos.dist(&self) < range {
+            pos.direction(&self)
+        } else {
+            // we were unable to find an average position, so we need to make one up
+            let distribution = Normal::new(dir, 1.0).unwrap();
+            let mut direction = distribution.sample(&mut rand::thread_rng());
+            // match to a valid direction
+            while direction > 359.9 {
+                direction -= 359.9;
+            }
+            while direction < 0.0 {
+                direction += 359.9
+            }
+            direction
+        }
+    }
+}
+
+impl Navigable for Vec<Coordinate> {
+    fn get_nearest(&self, pos: &Coordinate, range: f32, dist: f32, dir: f32) -> Coordinate {
+        let mut final_pos = None;
+        let mut final_dir = None;
+        for s in self {
+            let dist = pos.dist(&s);
+            if dist < range {
+                match final_pos {
+                    Some(p) => {
+                        if s.dist(&pos) < s.dist(p) {
+                            final_pos = Some(&s);
+                        }
+                    }
+                    None => {
+                        final_pos = Some(&s);
+                    }
+                }
+            }
+        }
+        if let None = final_pos {
+            // we were unable to find a position, so we need to make one up
+            let distribution = Normal::new(dir, 1.0).unwrap();
+            let mut direction = distribution.sample(&mut rand::thread_rng());
+            // match to a valid direction
+            while direction > 359.9 {
+                direction -= 359.9;
+            }
+            while direction < 0.0 {
+                direction += 359.9
+            }
+            final_dir = Some(direction);
+        } else {
+            final_dir = Some(pos.direction(&(final_pos.unwrap())));
+        }
+        // now go from a direction and a coordinate to a new coordinate
+        pos.traverse_direction(final_dir.unwrap(), dist)
+    }
+
+    fn get_avg_direction(&self, pos: &Coordinate, range: f32, dist: f32, dir: f32) -> f32 {
+        //let mut final_pos = None;
+        let mut final_x = 0.0;
+        let mut final_y = 0.0;
+        //let mut last_strength = None;
+        let mut count = 0;
+        for s in self {
+            let dist = pos.dist(&s);
+            if dist < range {
+                final_x += s.x;
+                final_y += s.y;
+                count = count + 1;
+            }
+        }
+        if count == 0 {
+            // we have no in-range points
+            let distribution = Normal::new(dir, 1.0).unwrap();
+            let mut direction = distribution.sample(&mut rand::thread_rng());
+            while direction > 359.9 {
+                direction -= 359.9;
+            }
+            while direction < 0.0 {
+                direction += 359.9
+            }
+            let point = pos.traverse_direction(dir, range);
+            final_x = point.x;
+            final_y = point.y;
+        } else {
+            final_x = final_x / (count as f32);
+            final_y = final_y / (count as f32);
+        }
+        let direction = pos.direction(&Coordinate::new(final_x, final_y));
+        direction
     }
 }
 
