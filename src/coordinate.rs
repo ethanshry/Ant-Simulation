@@ -9,6 +9,8 @@ use rand_distr::Normal;
 const X_SIZE: f32 = 500.0;
 const Y_SIZE: f32 = 500.0;
 
+const RANDOMNESS: f32 = 15.0;
+
 #[derive(Debug, PartialEq)]
 pub struct Coordinate {
     pub x: f32,
@@ -101,14 +103,16 @@ impl Clone for Coordinate {
 }
 
 impl Navigable for Coordinate {
-    fn get_nearest(&self, pos: &Coordinate, range: f32, dist: f32, dir: f32) -> Coordinate {
+    fn get_nearest(&self, pos: &Coordinate, range: f32, dist: f32, dir: f32) -> Option<Coordinate> {
         // now go from a direction and a coordinate to a new coordinate
         if pos.dist(&self) < range {
-            self.clone()
-        } else {
-            let dir = self.get_avg_direction(pos, range, dist, dir);
-            self.traverse_direction(dir, range)
+            return Some(self.clone());
         }
+        None
+        /*else {
+            let dir = self.get_avg_direction(pos, range, dist, dir);
+            pos.traverse_direction(dir, range)
+        }*/
     }
 
     fn get_avg_direction(&self, pos: &Coordinate, range: f32, dist: f32, dir: f32) -> f32 {
@@ -116,7 +120,7 @@ impl Navigable for Coordinate {
             pos.direction(&self)
         } else {
             // we were unable to find an average position, so we need to make one up
-            let distribution = Normal::new(dir, 1.0).unwrap();
+            let distribution = Normal::new(dir, RANDOMNESS).unwrap();
             let mut direction = distribution.sample(&mut rand::thread_rng());
             // match to a valid direction
             while direction > 359.9 {
@@ -131,7 +135,7 @@ impl Navigable for Coordinate {
 }
 
 impl Navigable for Vec<Coordinate> {
-    fn get_nearest(&self, pos: &Coordinate, range: f32, dist: f32, dir: f32) -> Coordinate {
+    fn get_nearest(&self, pos: &Coordinate, range: f32, dist: f32, dir: f32) -> Option<Coordinate> {
         let mut final_pos = None;
         let mut final_dir = None;
         for s in self {
@@ -150,8 +154,10 @@ impl Navigable for Vec<Coordinate> {
             }
         }
         if let None = final_pos {
+            return None;
+            /*
             // we were unable to find a position, so we need to make one up
-            let distribution = Normal::new(dir, 1.0).unwrap();
+            let distribution = Normal::new(dir, RANDOMNESS).unwrap();
             let mut direction = distribution.sample(&mut rand::thread_rng());
             // match to a valid direction
             while direction > 359.9 {
@@ -161,11 +167,12 @@ impl Navigable for Vec<Coordinate> {
                 direction += 359.9
             }
             final_dir = Some(direction);
+            */
         } else {
             final_dir = Some(pos.direction(&(final_pos.unwrap())));
         }
         // now go from a direction and a coordinate to a new coordinate
-        pos.traverse_direction(final_dir.unwrap(), dist)
+        Some(pos.traverse_direction(final_dir.unwrap(), dist))
     }
 
     fn get_avg_direction(&self, pos: &Coordinate, range: f32, dist: f32, dir: f32) -> f32 {
@@ -184,7 +191,7 @@ impl Navigable for Vec<Coordinate> {
         }
         if count == 0 {
             // we have no in-range points
-            let distribution = Normal::new(dir, 1.0).unwrap();
+            let distribution = Normal::new(dir, RANDOMNESS).unwrap();
             let mut direction = distribution.sample(&mut rand::thread_rng());
             while direction > 359.9 {
                 direction -= 359.9;

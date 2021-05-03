@@ -9,7 +9,7 @@ use ggez::{
     conf::WindowMode,
     conf::WindowSetup,
     event,
-    graphics::{Mesh, MeshBuilder},
+    graphics::{GlBackendSpec, ImageGeneric, Mesh, MeshBuilder},
     timer, Context, ContextBuilder, GameResult,
 };
 use rand::prelude::*;
@@ -27,23 +27,28 @@ use scent::{Scent, SCENT_LIFE};
 
 const ANT_SPEED: f32 = 3.0;
 const ANT_DETECTION_RANGE: f32 = 50.0;
-const HOME_SIZE: f32 = 25.0;
+const HOME_SIZE: f32 = 15.0;
 
 const X_SIZE: f32 = 500.0;
 const Y_SIZE: f32 = 500.0;
 
-struct State {
+struct State<'a> {
     dt: std::time::Duration,
     home_position: Coordinate,
     food_positions: Vec<Coordinate>,
-    ants: Vec<Ant>,
+    ants: Vec<Ant<'a>>,
     home_scents: Vec<Scent>,
     food_scents: Vec<Scent>,
     home_food: u32,
+    ant_frames: &'a [ImageGeneric<GlBackendSpec>],
+    anthill: ImageGeneric<GlBackendSpec>,
 }
 
-impl State {
-    pub fn new() -> State {
+impl<'a> State<'a> {
+    pub fn new(
+        anthill: ImageGeneric<GlBackendSpec>,
+        ant_frames: &'a [ImageGeneric<GlBackendSpec>],
+    ) -> State<'a> {
         let food_positions = vec![];
 
         State {
@@ -53,7 +58,9 @@ impl State {
             ants: vec![],
             home_scents: vec![],
             food_scents: vec![],
-            home_food: 6,
+            home_food: 26,
+            ant_frames: ant_frames,
+            anthill,
         }
     }
 }
@@ -111,12 +118,15 @@ fn gen_food_cluster(size: u32, x: f32, y: f32) -> Vec<Coordinate> {
     return coords;
 }
 
-impl ggez::event::EventHandler for State {
+impl<'a> ggez::event::EventHandler for State<'a> {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
         while timer::check_update_time(ctx, 30) {
             if self.home_food > 5 {
-                self.ants
-                    .push(Ant::new(self.home_position.x, self.home_position.y));
+                self.ants.push(Ant::new(
+                    self.home_position.x,
+                    self.home_position.y,
+                    self.ant_frames,
+                ));
                 self.home_food -= 5;
             }
             self.home_scents = Vec::drain_filter(&mut self.home_scents, |s| {
@@ -155,6 +165,13 @@ impl ggez::event::EventHandler for State {
                         // we have
                         a.has_food = false;
                         self.home_food += 1;
+                        a.direction = {
+                            if a.direction > 180.0 {
+                                a.direction - 180.0
+                            } else {
+                                a.direction + 180.0
+                            }
+                        }
                     }
                 } else {
                     let new_dir = match a.direction {
@@ -202,7 +219,7 @@ impl ggez::event::EventHandler for State {
                 }
             }
             self.ants = Vec::drain_filter(&mut self.ants, |a| {
-                a.life > 0 || a.position != a.position.check_bounds(0.0, X_SIZE, 0.0, Y_SIZE)
+                a.life > 0 && a.position == a.position.check_bounds(0.0, X_SIZE, 0.0, Y_SIZE)
             })
             .collect();
         }
@@ -216,13 +233,14 @@ impl ggez::event::EventHandler for State {
         // println!("food scents: {}", self.food_scents.len());
         // println!("home food: {}", self.home_food);
         let mut scene = &mut ggez::graphics::MeshBuilder::new();
+        /*
         scene.circle(
             ggez::graphics::DrawMode::Fill(ggez::graphics::FillOptions::DEFAULT),
             self.home_position.clone(),
             HOME_SIZE as f32,
             1.0,
             ggez::graphics::Color::from_rgb(46, 19, 0),
-        );
+        );*/
 
         for hs in self.home_scents.iter_mut() {
             let life = match hs.life {
@@ -263,46 +281,43 @@ impl ggez::event::EventHandler for State {
         }
 
         for a in self.ants.iter_mut() {
-            scene = a.draw(scene);
-            println!("direction: {}", a.direction);
+            scene = a.draw_debug(scene);
+            //a.draw(ctx);
         }
+
         let scene = scene.build(ctx).unwrap();
-        ggez::graphics::clear(ctx, ggez::graphics::Color::from_rgb(0, 0, 0));
+        ggez::graphics::clear(ctx, ggez::graphics::Color::from_rgb(200, 200, 200));
+        let params = ggez::graphics::DrawParam::default()
+            .offset(ggez::mint::Vector2 { x: 0.5, y: 0.5 })
+            .scale(ggez::mint::Vector2 { y: 2.0, x: 2.0 })
+            .dest(ggez::mint::Vector2 {
+                y: self.home_position.y * 2.0,
+                x: self.home_position.x * 2.0,
+            });
+        ggez::graphics::draw(ctx, &self.anthill, params).unwrap();
         let mut params = ggez::graphics::DrawParam::default();
         params.scale = ggez::mint::Vector2 {
             x: 2.0 as f32,
             y: 2.0 as f32,
         };
         ggez::graphics::draw(ctx, &scene, params).unwrap();
+        for a in self.ants.iter_mut() {
+            //scene = a.draw(scene);
+            a.draw(ctx);
+        }
         ggez::graphics::present(ctx).unwrap();
         Ok(())
     }
 }
 
 pub fn main() {
-    let mut state = State::new();
-
-    state.home_scents.push(Scent {
-        position: Coordinate {
-            x: X_SIZE / 2.0,
-            y: Y_SIZE / 2.0,
-        },
-        direction: 0.0,
-        life: u32::MAX,
-    });
-
-    // gen food clusters
-    for _ in 0..15 {
-        let mut r = rand::thread_rng();
-
-        // get baseline variance
-        let x: f32 = r.gen::<f32>() * (X_SIZE as f32);
-        let y: f32 = r.gen::<f32>() * (Y_SIZE as f32);
-
-        let mut cluster = gen_food_cluster(150, x.enforce_x_bounds(), y.enforce_y_bounds());
-        state.food_positions.append(&mut cluster);
-    }
-
+    let resource_dir = if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+        let mut path = std::path::PathBuf::from(manifest_dir);
+        path.push("resources");
+        path
+    } else {
+        std::path::PathBuf::from("./resources")
+    };
     let mut c = Conf::new();
     c.window_setup = WindowSetup {
         title: "Ant Simulator".to_owned(),
@@ -325,7 +340,37 @@ pub fn main() {
     };
     let (ref mut ctx, ref mut event_loop) = ContextBuilder::new("hello_ggez", "awesome_person")
         .conf(c)
+        .add_resource_path(resource_dir)
         .build()
         .unwrap();
+
+    let anthill = ggez::graphics::Image::new(ctx, "/anthill.png").unwrap();
+
+    let ant_0 = ggez::graphics::Image::new(ctx, "/ant1.png").unwrap();
+    let ant_1 = ggez::graphics::Image::new(ctx, "/ant2.png").unwrap();
+
+    let ant_frames = &[ant_0, ant_1];
+    let mut state = State::new(anthill, ant_frames);
+
+    state.home_scents.push(Scent {
+        position: Coordinate {
+            x: X_SIZE / 2.0,
+            y: Y_SIZE / 2.0,
+        },
+        direction: 0.0,
+        life: u32::MAX,
+    });
+
+    // gen food clusters
+    for _ in 0..15 {
+        let mut r = rand::thread_rng();
+
+        // get baseline variance
+        let x: f32 = r.gen::<f32>() * (X_SIZE as f32);
+        let y: f32 = r.gen::<f32>() * (Y_SIZE as f32);
+
+        let mut cluster = gen_food_cluster(150, x.enforce_x_bounds(), y.enforce_y_bounds());
+        state.food_positions.append(&mut cluster);
+    }
     event::run(ctx, event_loop, &mut state).unwrap();
 }
